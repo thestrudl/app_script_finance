@@ -3,6 +3,7 @@ var telegramUrl = "https://api.telegram.org/bot" + token; // 2. Telegram URL for
 var webAppUrl = ""; // 2. FILL IN YOUR GOOGLE WEB APP ADDRESS you only get it after Google WEB app is deployed
 var ssId = "";      // 3. FILL IN THE ID OF YOUR GOOGLE SPREADSHEET
 var adminID = "";   // 4. Fill in your own Telegram ID for debugging - Telegram -> userinfobot
+var version = "1.0"
 
 // Function to get chat info - debug
 function getMe() {
@@ -30,6 +31,22 @@ function sendText(id,text) {
   Logger.log(response.getContentText());
 }
 
+// Function to send text message along buttons to telegram
+function sendTextKeyboard(id,text, reply_markup) {
+  var payload = {
+    method: "post",
+    contentType: "application/json",
+    payload: JSON.stringify({
+      chat_id: id,
+      text: text,
+      reply_markup: reply_markup
+    })
+  };
+  var url = telegramUrl + "/sendMessage";
+  var response = UrlFetchApp.fetch(url, payload);
+  Logger.log(response.getContentText());
+}
+
 // Function to send google drive image to chat
 function sendImage(id,imgId){
   var directDownloadUrl = "https://drive.google.com/uc?id=" + imgId + "&export=download";
@@ -53,8 +70,10 @@ function concatenateArraysAsColumns(arr1, arr2) {
   return result;
 }
 
+
 // Function to send Monthly statistic to chat - Graph + Text
 function sendChartToTelegram(chatId) {
+  //var chatId = "6844823074"
   var date = new Date()
   var currentYear = date.getFullYear();
   var currentMonth = date.getMonth() + 1;
@@ -68,6 +87,7 @@ function sendChartToTelegram(chatId) {
     return;
   }
 
+  //var range = sheet.getRange("B20:R32");
   var range = sheet.getRange('B20:R32');
   var headersArray = range.getValues()[0];
   var valuesArray = range.getValues()[currentMonth];
@@ -208,7 +228,6 @@ function fetchRepeatData() {
   return tsvData
 }
 
-
 // Function that copies monthly reoccuring expenses from repeatData spreadsheet to WebHookData
 function logRepeatData() {
   // Open the spreadsheet and get the sheets
@@ -248,62 +267,101 @@ function logRepeatData() {
 
 }
 
+// Callback handler for buttons
+function handleCallbackQuery(id, callbackData) {
+  if (callbackData === "categories") {
+    handleCategories(id);
+  } else if (callbackData === "report") {
+    handleReport(id);
+  } else if (callbackData === "listRepeat") {
+    handleListRepeat(id);
+  }
+}
+
 // Function that handles input and points to correct handler
 function doPost(e) {
   try {
     // Parse incoming data
     var data = JSON.parse(e.postData.contents);
-    var text = data.message.text.trim();
-    var id = data.message.chat.id;
-    var name = data.message.chat.first_name + " " + data.message.chat.last_name;
-    
-    // Define regex patterns
-    var patterns = {
-      help: /\bhelp\b/i,
-      categories: /\bcategories\b/i,
-      report: /\breport\b/i,
-      listRepeat: /\blist\s+repeat\b/i,
-      expense: /^(\w+)\s+(\d+(?:\.\d+)?)(?:\s+(.*))?$/,
-      income: /^in\s+(\w+)\s+(\d+(?:\.\d+)?)(?:\s+(.*))?$/i,
-      repeatIn: /^repeat\s+in\s+(\w+)\s+(\d+(?:\.\d+)?)(?:\s+(\d{1,2}))?\s*(.*)?$/i,
-      repeatEx: /^repeat\s+(\w+)\s+(\d+(?:\.\d+)?)(?:\s+(\d{1,2}))?\s*(.*)?$/i
+    if (data.message) {
+      // Handle message
+      var text = data.message.text.trim();
+      var id = data.message.chat.id;
+      var name = data.message.chat.first_name + " " + data.message.chat.last_name;
 
-    };
+      // Define regex patterns
+      var patterns = {
+        help: /\bhelp\b/i,
+        categories: /\bcategories\b/i,
+        report: /\breport\b/i,
+        listRepeat: /\blist\s+repeat\b/i,
+        expense: /^(\w+)\s+(-?\d+(?:\.\d+)?)(?:\s+(.*))?$/,
+        income: /^in\s+(\w+)\s+(\d+(?:\.\d+)?)(?:\s+(.*))?$/i,
+        repeatIn: /^repeat\s+in\s+(\w+)\s+(\d+(?:\.\d+)?)(?:\s+(\d{1,2}))?\s*(.*)?$/i,
+        repeatEx: /^repeat\s+(\w+)\s+(\d+(?:\.\d+)?)(?:\s+(\d{1,2}))?\s*(.*)?$/i,
+        version: /^version$/i
+      };
 
-    // Define command handlers
-    var handlers = {
-      help: handleHelp,
-      categories: handleCategories,
-      report: handleReport,
-      listRepeat: handleListRepeat,
-      expense: handleExpense,
-      income: handleIncome,
-      repeatIn: handleRepeatIncome,
-      repeatEx: handleRepeatExpense
-    };
+      // Define command handlers
+      var handlers = {
+        help: handleHelp,
+        categories: handleCategories,
+        report: handleReport,
+        listRepeat: handleListRepeat,
+        expense: handleExpense,
+        income: handleIncome,
+        repeatIn: handleRepeatIncome,
+        repeatEx: handleRepeatExpense,
+        version: handleVersion
+      };
 
-    // Match and handle command
-    for (var key in patterns) {
-      var match = patterns[key].exec(text);
-      if (match) {
-        handlers[key](id, name, match);
-        return;
+      // Match and handle command
+      for (var key in patterns) {
+        var match = patterns[key].exec(text);
+        if (match) {
+          handlers[key](id, name, match);
+          return;
+        }
       }
-    }
 
-    // If no match, send error
-    sendText(id, "Wrong Format, write\"help\" if you need help ;)");
+      // If no match, send error
+      sendText(id, "Wrong Format, write \"help\" if you need help ;)");
+
+    } else if (data.callback_query) {
+      // Handle callback query
+      var callbackData = data.callback_query.data;
+      var id = data.callback_query.message.chat.id;
+
+      handleCallbackQuery(id, callbackData);
+    }
 
   } catch (e) {
     sendText(adminID, JSON.stringify(e, null, 4));
   }
 }
 
+// Function for printing out version of the App script backend
+function handleVersion(id) {
+  message = "AppScript backend is on version:"
+  sendText(id, message)
+  sendText(id, version)
+}
+
 // Command handler functions
 function handleHelp(id) {
   var answer = `Options:\n\n - help\n - categories\n - report\n - list repeat (List repeat monthly incomes/expenses)\n\nEnter expense in form:\n\nCATEGORY X.XX COMMENT\nFood 5.5 Jurman\n\nFor income just add "in" phrase e.g\n\nIN CATEGORY X.XX COMMENT\nIN Salary 500 Company\n\nFor entering monthly repeat expenses (DAY is day of the month expense will be logged):\n\nREPEAT (in) CATEGORY X.XX DAY COMMENT\nREPEAT in salary 1000 15 company `;
-  sendText(id, answer);
+  
+  var keyboard = {
+    inline_keyboard: [
+      [{ text: "Categories", callback_data: "categories" }],
+      [{ text: "Report", callback_data: "report" }],
+      [{ text: "List Repeat", callback_data: "listRepeat" }]
+    ]
+  };
+
+  sendTextKeyboard(id, answer, keyboard);
 }
+
 
 function handleCategories(id) {
   var expenseCategories = getExpenseCategoriesFromSheet();
